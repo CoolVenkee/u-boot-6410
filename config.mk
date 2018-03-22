@@ -157,6 +157,9 @@ endif
 CPPFLAGS += -I$(TOPDIR)/include
 CPPFLAGS += -fno-builtin -ffreestanding -nostdinc 	\
 	-isystem $(gccincdir) -pipe $(PLATFORM_CPPFLAGS)
+ifdef DRAM_VERSION
+CPPFLAGS += -DDRAM_VERSION
+endif
 
 ifdef BUILD_TAG
 CFLAGS := $(CPPFLAGS) -Wall -Wstrict-prototypes \

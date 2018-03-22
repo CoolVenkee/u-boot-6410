@@ -25,6 +25,11 @@
 
 
 ifndef TEXT_BASE
+ifdef DRAM_VERSION
+# Modified the TEXT_BASE on DRAM first address
+TEXT_BASE = 0x50000000
+else
 TEXT_BASE = 0xc7e00000
+endif
 endif
 

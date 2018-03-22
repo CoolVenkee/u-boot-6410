@@ -42,7 +42,10 @@
 /* input clock of PLL */
 #define CONFIG_SYS_CLK_FREQ	12000000	/* the SMDK6400 has 12MHz input clock */
 
+/* Disable mmu function */
+#ifndef DRAM_VERSION
 #define CONFIG_ENABLE_MMU
+#endif
 #ifdef CONFIG_ENABLE_MMU
 #define virt_to_phys(x)	virt_to_phy_smdk6410(x)
 #else
