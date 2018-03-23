@@ -29,6 +29,9 @@
 #ifndef __CONFIG_H
 #define __CONFIG_H
 
+//#define DEBUG
+#define CONFIG_DM9000_DEBUG
+
 /*
  * High Level Configuration Options
  * (easy to change)

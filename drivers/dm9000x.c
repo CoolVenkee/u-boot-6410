@@ -99,8 +99,11 @@ typedef struct board_info {
 	u8 phy_addr;
 	u8 device_wait_reset;	/* device state */
 	unsigned char srom[128];
+    /* 写数据的回调 */
 	void (*outblk)(volatile void *data_ptr, int count);
+    /* 读数据的回调 */
 	void (*inblk)(void *data_ptr, int count);
+    /* 接收状态回调 */
 	void (*rx_status)(u16 *RxStatus, u16 *RxLen);
 } board_info_t;
 static board_info_t dm9000_info;
@@ -179,6 +182,7 @@ static void dm9000_inblk_16bit(void *data_ptr, int count)
 	int i;
 	u32 tmplen = (count + 1) / 2;
 
+    /* 已经把寄存器地址设置位MRCMD，顺序读取SRAM地址会递增 */
 	for (i = 0; i < tmplen; i++)
 		((u16 *) data_ptr)[i] = DM9000_inw(DM9000_DATA);
 }
@@ -204,7 +208,7 @@ static void dm9000_rx_status_32bit(u16 *RxStatus, u16 *RxLen)
 
 static void dm9000_rx_status_16bit(u16 *RxStatus, u16 *RxLen)
 {
-	DM9000_outb(DM9000_MRCMD, DM9000_IO);
+    DM9000_outb(DM9000_MRCMD, DM9000_IO); /* 用MRCMD寄存器读取RX SRAM，地址会递增 */
 
 	*RxStatus = __le16_to_cpu(DM9000_inw(DM9000_DATA));
 	*RxLen = __le16_to_cpu(DM9000_inw(DM9000_DATA));
@@ -229,6 +233,8 @@ int
 dm9000_probe(void)
 {
 	u32 id_val;
+
+    /* 读取Vender和Product ID */
 	id_val = DM9000_ior(DM9000_VIDL);
 	id_val |= DM9000_ior(DM9000_VIDH) << 8;
 	id_val |= DM9000_ior(DM9000_PIDL) << 16;
@@ -263,7 +269,7 @@ dm9000_reset(void)
 	do {
 		DM9000_DBG("resetting the DM9000, 1st reset\n");
 		udelay(25); /* Wait at least 20 us */
-	} while (DM9000_ior(DM9000_NCR) & 1);
+    } while (DM9000_ior(DM9000_NCR) & 1); /* 等待NCR第0位为0（复位默认值为0）*/
 
 	DM9000_iow(DM9000_NCR, 0);
 	DM9000_iow(DM9000_NCR, (NCR_LBK_INT_MAC | NCR_RST)); /* Issue a second reset */
@@ -275,7 +281,7 @@ dm9000_reset(void)
 
 	/* Check whether the ethernet controller is present */
 	if ((DM9000_ior(DM9000_PIDL) != 0x0) ||
-	    (DM9000_ior(DM9000_PIDH) != 0x90))
+        (DM9000_ior(DM9000_PIDH) != 0x90)) /* 检测ID */
 		printf("ERROR: resetting DM9000 -> not responding\n");
 }
 
@@ -293,7 +299,7 @@ eth_set_mac(bd_t * bd)
 	for (i = 0, oft = DM9000_PAR; i < 6; i++, oft++)
 		DM9000_iow(oft, bd->bi_enetaddr[i]);
 	for (i = 0, oft = 0x16; i < 8; i++, oft++)
-		DM9000_iow(oft, 0xff);
+        DM9000_iow(oft, 0xff); /* 后面两个byte补0xff */
 
 	/* read back mac, just to be sure */
 	for (i = 0, oft = 0x10; i < 6; i++, oft++)
@@ -313,21 +319,21 @@ eth_init(bd_t * bd)
 
 	DM9000_DBG("eth_init()\n");
 
-	/* RESET device */
+    /* RESET device */ /* 初始化DM9000 */
 	dm9000_reset();
 
-	if (dm9000_probe() < 0)
+    if (dm9000_probe() < 0) /* 检测DM9000 ID */
 		return -1;
 
-	/* Auto-detect 8/16/32 bit mode, ISR Bit 6+7 indicate bus width */
+    /* Auto-detect 8/16/32 bit mode, ISR Bit 6+7 indicate bus width */ /* 检查数据总线宽度，第6和第7位指示 */
 	io_mode = DM9000_ior(DM9000_ISR) >> 6;
 
 	switch (io_mode) {
 	case 0x0:  /* 16-bit mode */
 		printf("DM9000: running in 16 bit mode\n");
-		db->outblk    = dm9000_outblk_16bit;
-		db->inblk     = dm9000_inblk_16bit;
-		db->rx_status = dm9000_rx_status_16bit;
+        db->outblk    = dm9000_outblk_16bit; /* 写数据的回调 */
+        db->inblk     = dm9000_inblk_16bit; /* 读数据的回调 */
+        db->rx_status = dm9000_rx_status_16bit; /* 接收状态回调 */
 		break;
 	case 0x01:  /* 32-bit mode */
 		printf("DM9000: running in 32 bit mode\n");
@@ -352,19 +358,19 @@ eth_init(bd_t * bd)
 
 	/* Program operating register, only internal phy supported */
 	DM9000_iow(DM9000_NCR, 0x0);
-	/* TX Polling clear */
+    /* TX Polling clear */ /* 清除发送请求 */
 	DM9000_iow(DM9000_TCR, 0);
-	/* Less 3Kb, 200us */
-	DM9000_iow(DM9000_BPTR, BPTR_BPHW(3) | BPTR_JPT_600US);
-	/* Flow Control : High/Low Water */
+    /* Less 3Kb, 200us */ /* 接收缓冲阀值(半双工），内部接收SRAM低于3K时向远端触发拥塞信号，持续600us*/
+    DM9000_iow(DM9000_BPTR, BPTR_BPHW(3) | BPTR_JPT_600US);
+    /* Flow Control : High/Low Water */ /* 低于3K或者高于8K都发送暂停信号，全双工 */
 	DM9000_iow(DM9000_FCTR, FCTR_HWOT(3) | FCTR_LWOT(8));
 	/* SH FIXME: This looks strange! Flow Control */
 	DM9000_iow(DM9000_FCR, 0x0);
 	/* Special Mode */
 	DM9000_iow(DM9000_SMCR, 0);
-	/* clear TX status */
+    /* clear TX status */ /* 初始化发送状态寄存器 */
 	DM9000_iow(DM9000_NSR, NSR_WAKEST | NSR_TX2END | NSR_TX1END);
-	/* Clear interrupt status */
+    /* Clear interrupt status */ /* 初始化中断寄存器 */
 	DM9000_iow(DM9000_ISR, ISR_ROOS | ISR_ROS | ISR_PTS | ISR_PRS);
 
 	/* Set Node address */
@@ -389,9 +395,9 @@ eth_init(bd_t * bd)
 	eth_set_mac(bd);
 
 	/* Activate DM9000 */
-	/* RX enable */
+    /* RX enable */ /* 丢弃超过长度的包，丢弃crc校验问题的包，启动接收 */
 	DM9000_iow(DM9000_RCR, RCR_DIS_LONG | RCR_DIS_CRC | RCR_RXEN);
-	/* Enable TX/RX interrupt mask */
+    /* Enable TX/RX interrupt mask */ /* 打开接收中断 */
 	DM9000_iow(DM9000_IMR, IMR_PAR);
 
 #ifdef CONFIG_MINI2440
@@ -399,7 +405,7 @@ eth_init(bd_t * bd)
 	return 0;
 #endif
 	i = 0;
-	while (!(phy_read(1) & 0x20)) {	/* autonegation complete bit */
+    while (!(phy_read(1) & 0x20)) {	/* autonegation complete bit */ /* 查询BMSR 01 0x00000000 00100000=0x20（自动协商)是否完成 */
 		udelay(1000);
 		i++;
 		if (i == 10000) {
@@ -408,8 +414,8 @@ eth_init(bd_t * bd)
 		}
 	}
 
-	/* see what we've got */
-	lnk = phy_read(17) >> 12;
+    /* see what we've got */ /* 取得传输速度和模式 */
+    lnk = phy_read(17) >> 12; /* DSCSR 17 取高4位 */
 	printf("operating at ");
 	switch (lnk) {
 	case 1:
@@ -444,31 +450,31 @@ eth_send(volatile void *packet, int length)
 
 	DM9000_DMP_PACKET("eth_send", packet, length);
 
-	DM9000_iow(DM9000_ISR, IMR_PTM); /* Clear Tx bit in ISR */
+    DM9000_iow(DM9000_ISR, IMR_PTM); /* Clear Tx bit in ISR */ /* 清除发送中断 */
 
 	/* Move data to DM9000 TX RAM */
-	DM9000_outb(DM9000_MWCMD, DM9000_IO); /* Prepare for TX-data */
+    DM9000_outb(DM9000_MWCMD, DM9000_IO); /* Prepare for TX-data */ /* 设置地址为sram寄存器地址，往后可以多次进行写操作，根据8bit还是16bit模式，地址自增1或2 */
 
-	/* push the data to the TX-fifo */
+    /* push the data to the TX-fifo */ /* 写发送fifo */
 	(db->outblk)(packet, length);
 
 	/* Set TX length to DM9000 */
-	DM9000_iow(DM9000_TXPLL, length & 0xff);
+    DM9000_iow(DM9000_TXPLL, length & 0xff); /* 设置需要发送数据的长度高地位 */
 	DM9000_iow(DM9000_TXPLH, (length >> 8) & 0xff);
 
 	/* Issue TX polling command */
-	DM9000_iow(DM9000_TCR, TCR_TXREQ); /* Cleared after TX complete */
+    DM9000_iow(DM9000_TCR, TCR_TXREQ); /* Cleared after TX complete */ /* 启动发送 */
 
-	/* wait for end of transmission */
+    /* wait for end of transmission */ /* 设置查询超时时间 */
 	tmo = get_timer(0) + 5 * CFG_HZ;
 	while ( !(DM9000_ior(DM9000_NSR) & (NSR_TX1END | NSR_TX2END)) ||
-		!(DM9000_ior(DM9000_ISR) & IMR_PTM) ) {
-		if (get_timer(0) >= tmo) {
+        !(DM9000_ior(DM9000_ISR) & IMR_PTM) ) { /* 查询网络状态寄存器是否发送完成，或者查询中断寄存器发送中断是否产生 */
+        if (get_timer(0) >= tmo) { /* 超时失败 */
 			printf("transmission timeout\n");
 			break;
 		}
 	}
-	DM9000_iow(DM9000_ISR, IMR_PTM); /* Clear Tx bit in ISR */
+    DM9000_iow(DM9000_ISR, IMR_PTM); /* Clear Tx bit in ISR */ /* 清除中断 */
 
 	DM9000_DBG("transmit done\n\n");
 	return 0;
@@ -502,18 +508,20 @@ eth_rx(void)
 
 	/* Check packet ready or not, we must check
 	   the ISR status first for DM9000A */
-	if (!(DM9000_ior(DM9000_ISR) & 0x01)) /* Rx-ISR bit must be set. */
+    if (!(DM9000_ior(DM9000_ISR) & ISR_PRS)) /* Rx-ISR bit must be set. */ /* 查询是否有数据接收到 */
 		return 0;
 
-	DM9000_iow(DM9000_ISR, 0x01); /* clear PR status latched in bit 0 */
+    DM9000_iow(DM9000_ISR, 0x01); /* clear PR status latched in bit 0 */ /* 有数据了，清除接收中断 */
 
 	/* There is _at least_ 1 package in the fifo, read them all */
 	for (;;) {
-		DM9000_ior(DM9000_MRCMDX);	/* Dummy read */
+        /* DM9000接收的包结构4字节的头部+尾部带CRC的包体 */
+        /* 头部结构：0x00000001(无用),0x00000001(状态,0x1为有数据，0x0为无数据),0x00000000(数据长度低8位), 0x00000000(数据长度高8位）*/
+        DM9000_ior(DM9000_MRCMDX);	/* Dummy read */ /* 这个字节0x1没用，读MRCMDX寄存器内部sram指针不会递增 */
 
-		/* Get most updated data,
+        /* Get most updated data,
 		   only look at bits 0:1, See application notes DM9000 */
-		rxbyte = DM9000_inb(DM9000_DATA) & 0x03;
+        rxbyte = DM9000_inb(DM9000_DATA) & 0x03; /* 检查状态字节，多检查一位看看是否有其他错误 */
 
 		/* Status check: this byte must be 0 or 1 */
 		if (rxbyte > DM9000_PKT_RDY) {
@@ -524,12 +532,12 @@ eth_rx(void)
 			return 0;
 		}
 
-		if (rxbyte != DM9000_PKT_RDY)
+        if (rxbyte != DM9000_PKT_RDY) /* 状态位0，没有数据 */
 			return 0; /* No packet received, ignore */
 
 		DM9000_DBG("receiving packet\n");
 
-		/* A packet ready now  & Get status/length */
+        /* A packet ready now  & Get status/length */ /* 读取状态和长度 */
 		(db->rx_status)(&RxStatus, &RxLen);
 
 		DM9000_DBG("rx status: 0x%04x rx len: %d\n", RxStatus, RxLen);
@@ -540,13 +548,17 @@ eth_rx(void)
 
 		if ((RxStatus & 0xbf00) || (RxLen < 0x40)
 			|| (RxLen > DM9000_PKT_MAX)) {
-			if (RxStatus & 0x100) {
+            /* 1、取关注的接收状态位（这个status值等于RSR 06寄存器的值）
+             * 2、DM9000包32byte为单位，不能小于32byte
+             * 3、DM9000包最大1536byte，不能大于1536byte
+             */
+            if (RxStatus & 0x100) { /* filo溢出 */
 				printf("rx fifo error\n");
 			}
-			if (RxStatus & 0x200) {
+            if (RxStatus & 0x200) { /* CRC校验错误 */
 				printf("rx crc error\n");
 			}
-			if (RxStatus & 0x8000) {
+            if (RxStatus & 0x8000) { /* 数据长度不对 */
 				printf("rx length error\n");
 			}
 			if (RxLen > DM9000_PKT_MAX) {
@@ -616,12 +628,12 @@ phy_read(int reg)
 {
 	u16 val;
 
-	/* Fill the phyxcer register into REG_0C */
+    /* Fill the phyxcer register into REG_0C */ /* 写PHY地址寄存器，reg是某个PHY寄存器号 */
 	DM9000_iow(DM9000_EPAR, DM9000_PHY | reg);
-	DM9000_iow(DM9000_EPCR, 0xc);	/* Issue phyxcer read command */
+    DM9000_iow(DM9000_EPCR, 0xc);	/* Issue phyxcer read command */ /* 写向PHY读写控制寄存器发送读指令（0x00001100=0xc）*/
 	udelay(100);			/* Wait read complete */
-	DM9000_iow(DM9000_EPCR, 0x0);	/* Clear phyxcer read command */
-	val = (DM9000_ior(DM9000_EPDRH) << 8) | DM9000_ior(DM9000_EPDRL);
+    DM9000_iow(DM9000_EPCR, 0x0);	/* Clear phyxcer read command */ /* PHY控制寄存器复位 */
+    val = (DM9000_ior(DM9000_EPDRH) << 8) | DM9000_ior(DM9000_EPDRL); /* 读写PHY数据寄存器 */
 
 	/* The read data keeps on REG_0D & REG_0E */
 	DM9000_DBG("phy_read(0x%x): 0x%x\n", reg, val);
@@ -635,14 +647,14 @@ static void
 phy_write(int reg, u16 value)
 {
 
-	/* Fill the phyxcer register into REG_0C */
+    /* Fill the phyxcer register into REG_0C */ /* 设置PHY寄存器号 */
 	DM9000_iow(DM9000_EPAR, DM9000_PHY | reg);
 
-	/* Fill the written data into REG_0D & REG_0E */
+    /* Fill the written data into REG_0D & REG_0E */ /* 要写入的PHY寄存器值的高低8位 */
 	DM9000_iow(DM9000_EPDRL, (value & 0xff));
 	DM9000_iow(DM9000_EPDRH, ((value >> 8) & 0xff));
-	DM9000_iow(DM9000_EPCR, 0xa);	/* Issue phyxcer write command */
+    DM9000_iow(DM9000_EPCR, 0xa);	/* Issue phyxcer write command */ /* 启动写入操作 */
 	udelay(500);			/* Wait write complete */
-	DM9000_iow(DM9000_EPCR, 0x0);	/* Clear phyxcer write command */
+    DM9000_iow(DM9000_EPCR, 0x0);	/* Clear phyxcer write command */ /* 结束写入操作 */
 	DM9000_DBG("phy_write(reg:0x%x, value:0x%x)\n", reg, value);
 }

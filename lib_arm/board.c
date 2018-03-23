@@ -277,6 +277,7 @@ void start_armboot (void)
 #ifdef CONFIG_USE_IRQ
 	gd_base -= (CONFIG_STACKSIZE_IRQ+CONFIG_STACKSIZE_FIQ);
 #endif
+    /* 设置全局数据区 */
 	gd = (gd_t*)gd_base;
 #else
 	gd = (gd_t*)(_armboot_start - CFG_MALLOC_LEN - sizeof(gd_t));
@@ -291,6 +292,7 @@ void start_armboot (void)
 
 	monitor_flash_len = _bss_start - _armboot_start;
 
+    /* 循环执行初始化函数 */
 	for (init_fnc_ptr = init_sequence; *init_fnc_ptr; ++init_fnc_ptr) {
 		if ((*init_fnc_ptr)() != 0) {
 			hang ();

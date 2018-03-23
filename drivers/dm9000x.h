@@ -31,7 +31,7 @@
 #define DM9000_PAR             0x10
 #define DM9000_MAR             0x16
 
-#define DM9000_GPCR			0x1e
+#define DM9000_GPCR            0x1e
 #define DM9000_GPR             0x1f
 #define DM9000_TRPAL           0x22
 #define DM9000_TRPAH           0x23

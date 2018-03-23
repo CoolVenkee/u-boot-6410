@@ -126,6 +126,7 @@ ram256)
 *)
 	;;
 esac
+# 把平台头文件加入include/config.h
 echo "#include <configs/$1.h>" >>config.h
 
 exit 0

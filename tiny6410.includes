@@ -1,0 +1,17 @@
+board/samsung/mini6410
+board/samsung/smdk6410
+cpu/s3c64xx
+disk
+drivers
+drivers/qe
+drivers/sk98lin
+drivers/sk98lin/h
+examples
+fs/fdos
+fs/jffs2
+fs/reiserfs
+include
+include/asm
+include/asm/arch
+net
+lib_generic
